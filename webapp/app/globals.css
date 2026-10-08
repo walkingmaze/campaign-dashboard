@@ -24,3 +24,13 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.tree-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 860px) {
+  .tree-layout {
+    grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.9fr);
+  }
+}
