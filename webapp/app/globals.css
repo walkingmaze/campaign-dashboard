@@ -25,6 +25,35 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.tree-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.tree-header-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-kpi-target {
+  flex-shrink: 0;
+  margin-top: 6px;
+  margin-left: auto;
+}
+
+@media (max-width: 560px) {
+  .tree-header {
+    flex-wrap: wrap;
+  }
+
+  .tree-kpi-target {
+    margin-top: 4px;
+  }
+}
+
 .tree-layout {
   grid-template-columns: minmax(0, 1fr);
 }
