@@ -14,6 +14,8 @@ const PALETTE = {
   goldSoft: '#F0D9A3',
   sage: '#96C49A',
   sageDeep: '#5D8A62',
+  leafMuted: '#899057',
+  leafMutedDeep: '#6D7550',
   leaf: '#9BAF42',
   leafDeep: '#74834A',
   optimization: '#DE8736',
@@ -122,21 +124,38 @@ type Change = {
   metric_after: number | null;
 };
 
+type FoliageMood = 'sage' | 'olive';
+
 function formatMetric(value: number | null) {
-  return value == null ? '—' : `${value.toLocaleString()}€`;
+  return value == null ? '—' : `${value.toLocaleString('en-US')}€`;
+}
+
+function formatTargetDelta(value: number, target: number, lowerBetter: boolean) {
+  const difference = value - target;
+  if (difference === 0) return 'on target';
+
+  const better = lowerBetter ? difference < 0 : difference > 0;
+  const word = better ? 'better than' : 'worse than';
+  if (target === 0) return `${formatMetric(Math.abs(difference))} ${word} target`;
+
+  const percentage = Math.abs((difference / target) * 100);
+  const formatted = percentage < 10 ? percentage.toFixed(1) : Math.round(percentage).toString();
+  return `${formatted}% ${word} target`;
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function computeLayout(changes: Change[], kpiTarget: number, kpiMetric: string) {
+function computeLayout(changes: Change[], kpiTarget: number, kpiMetric: string, liveValue: number | null) {
   const lowerBetter = LOWER_IS_BETTER.includes(kpiMetric.toLowerCase());
   const relativePerformance = (value: number) => lowerBetter
     ? (kpiTarget - value) / kpiTarget
     : (value - kpiTarget) / kpiTarget;
   const latestChange = [...changes].reverse().find((change) => change.metric_after != null || change.metric_before != null);
-  const latestValue = latestChange?.metric_after ?? latestChange?.metric_before ?? kpiTarget;
+  const currentValue = liveValue ?? latestChange?.metric_after ?? latestChange?.metric_before ?? null;
+  const latestValue = currentValue ?? kpiTarget;
+  const foliageMood: FoliageMood = relativePerformance(latestValue) >= 0 ? 'sage' : 'olive';
   const trunkTop = clamp(HEALTH_Y + 22 - relativePerformance(latestValue) * 180, 110, 440);
 
   const branches = changes.map((c, i) => {
@@ -146,7 +165,11 @@ function computeLayout(changes: Change[], kpiTarget: number, kpiMetric: string) 
     const relDiff = relativePerformance(value);
     const tipY = attachY - 70;
     const side = i % 2 === 0 ? -1 : 1;
-    const status: 'above' | 'below' = relDiff >= 0 ? 'above' : 'below';
+    const status: 'above' | 'below' | 'onTarget' = relDiff > 0
+      ? 'above'
+      : relDiff < 0
+        ? 'below'
+        : 'onTarget';
 
     return {
       ...c,
@@ -156,7 +179,7 @@ function computeLayout(changes: Change[], kpiTarget: number, kpiMetric: string) 
     };
   });
 
-  return { trunkTop, branches };
+  return { trunkTop, branches, foliageMood, currentValue };
 }
 
 function branchPath(b: { attach: { x: number; y: number }; tip: { x: number; y: number } }) {
@@ -165,12 +188,24 @@ function branchPath(b: { attach: { x: number; y: number }; tip: { x: number; y: 
   return `M ${b.attach.x} ${b.attach.y} Q ${cx} ${cy} ${b.tip.x} ${b.tip.y}`;
 }
 
-function JadeLeafPair({ x, y, angle, scale = 1 }: { x: number; y: number; angle: number; scale?: number }) {
+function JadeLeafPair({ x, y, angle, scale = 1, mood }: { x: number; y: number; angle: number; scale?: number; mood?: FoliageMood }) {
+  const lightLeaf = mood === 'sage'
+    ? PALETTE.sage
+    : mood === 'olive'
+      ? PALETTE.leafMuted
+      : PALETTE.leaf;
+  const darkLeaf = mood === 'sage'
+    ? PALETTE.sageDeep
+    : mood === 'olive'
+      ? PALETTE.leafMutedDeep
+      : PALETTE.leafDeep;
+  const vein = mood === 'sage' ? '#B6D7B6' : mood === 'olive' ? '#A6A76E' : '#C0C66C';
+
   return (
     <g transform={`translate(${x}, ${y}) rotate(${angle}) scale(${scale})`}>
-      <path d="M 0 0 C -9 -17 -31 -24 -34 -11 C -36 1 -17 8 0 0 Z" fill={PALETTE.leaf} />
-      <path d="M 0 0 C 9 -18 30 -24 34 -11 C 36 1 17 8 0 0 Z" fill={PALETTE.leafDeep} />
-      <path d="M -2 0 Q -19 -13 -31 -13 M 2 0 Q 19 -13 31 -13" fill="none" stroke="#C0C66C" strokeWidth="1.2" opacity="0.7" />
+      <path d="M 0 0 C -9 -17 -31 -24 -34 -11 C -36 1 -17 8 0 0 Z" fill={lightLeaf} />
+      <path d="M 0 0 C 9 -18 30 -24 34 -11 C 36 1 17 8 0 0 Z" fill={darkLeaf} />
+      <path d="M -2 0 Q -19 -13 -31 -13 M 2 0 Q 19 -13 31 -13" fill="none" stroke={vein} strokeWidth="1.2" opacity="0.7" />
     </g>
   );
 }
@@ -193,9 +228,9 @@ const FOLIAGE_SHOOTS = [
   { t: 0.82, side: -1, dist: 72, size: 0.68 },
 ];
 
-function FoliageShoots({ trunkTop }: { trunkTop: number }) {
+function FoliageShoots({ trunkTop, mood }: { trunkTop: number; mood: FoliageMood }) {
   return (
-    <g opacity="0.85">
+    <g opacity="0.85" pointerEvents="none">
       {FOLIAGE_SHOOTS.map((f, i) => {
         const x = trunkX(f.t);
         const y = TRUNK_BASE.y - f.t * (TRUNK_BASE.y - trunkTop);
@@ -211,7 +246,7 @@ function FoliageShoots({ trunkTop }: { trunkTop: number }) {
               strokeWidth={5.8 - f.t * 3}
               strokeLinecap="round"
             />
-            <JadeLeafPair x={tipX} y={tipY} angle={angle} scale={f.size} />
+            <JadeLeafPair x={tipX} y={tipY} angle={angle} scale={f.size} mood={mood} />
           </g>
         );
       })}
@@ -219,7 +254,7 @@ function FoliageShoots({ trunkTop }: { trunkTop: number }) {
   );
 }
 
-function CrownShoot({ trunkTop }: { trunkTop: number }) {
+function CrownShoot({ trunkTop, mood }: { trunkTop: number; mood: FoliageMood }) {
   const x = trunkX(1);
 
   return (
@@ -227,10 +262,10 @@ function CrownShoot({ trunkTop }: { trunkTop: number }) {
       <path d={`M ${x - 1} ${trunkTop - 7} Q ${x - 13} ${trunkTop - 14} ${x - 27} ${trunkTop - 15}`} strokeWidth="3.5" />
       <path d={`M ${x + 1} ${trunkTop - 18} Q ${x + 13} ${trunkTop - 23} ${x + 29} ${trunkTop - 21}`} strokeWidth="3.5" />
       <path d={`M ${x - 1} ${trunkTop - 27} Q ${x - 10} ${trunkTop - 34} ${x - 20} ${trunkTop - 37}`} strokeWidth="2.8" />
-      <JadeLeafPair x={x - 28} y={trunkTop - 13} angle={-20} scale={0.58} />
-      <JadeLeafPair x={x + 30} y={trunkTop - 19} angle={16} scale={0.58} />
-      <JadeLeafPair x={x - 21} y={trunkTop - 35} angle={-24} scale={0.52} />
-      <JadeLeafPair x={x + 1} y={trunkTop - 39} angle={4} scale={0.58} />
+      <JadeLeafPair x={x - 28} y={trunkTop - 13} angle={-20} scale={0.58} mood={mood} />
+      <JadeLeafPair x={x + 30} y={trunkTop - 19} angle={16} scale={0.58} mood={mood} />
+      <JadeLeafPair x={x - 21} y={trunkTop - 35} angle={-24} scale={0.52} mood={mood} />
+      <JadeLeafPair x={x + 1} y={trunkTop - 39} angle={4} scale={0.58} mood={mood} />
     </g>
   );
 }
@@ -240,15 +275,22 @@ export default function TreeView({
   kpiMetric,
   kpiTarget,
   changes,
+  liveValue,
+  snapshotDate,
 }: {
   campaignName: string;
   kpiMetric: string;
   kpiTarget: number;
   changes: Change[];
+  liveValue: number | null;
+  snapshotDate: string | null;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const { trunkTop, branches } = computeLayout(changes, kpiTarget, kpiMetric);
-  const active = branches.find((b) => b.id === activeId) ?? null;
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const { trunkTop, branches, foliageMood, currentValue } = computeLayout(changes, kpiTarget, kpiMetric, liveValue);
+  const previewId = hoveredId ?? focusedId ?? activeId;
+  const active = branches.find((b) => b.id === previewId) ?? null;
 
   return (
     <div
@@ -261,17 +303,24 @@ export default function TreeView({
       }}
     >
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <header style={{ marginBottom: 20, display: 'grid', gap: 6 }}>
-          <div style={{ color: PALETTE.muted, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-            Campaign overview
+        <header className="tree-header" style={{ marginBottom: 20 }}>
+          <div className="tree-header-copy">
+            <div style={{ color: PALETTE.muted, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+              Campaign overview
+            </div>
+            <h1 style={{ margin: 0, fontSize: 'clamp(2rem, 2vw + 1rem, 2.8rem)', lineHeight: 1.1, letterSpacing: '-0.05em' }}>
+              {campaignName}
+            </h1>
+            <div aria-label="Current KPI status" style={{ color: foliageMood === 'sage' ? PALETTE.sage : PALETTE.optimization, fontSize: 13, lineHeight: 1.5 }}>
+              {currentValue == null
+                ? `No logged ${kpiMetric.toUpperCase()} value yet`
+                : `${kpiMetric.toUpperCase()} now ${formatMetric(currentValue)} · ${formatTargetDelta(currentValue, kpiTarget, LOWER_IS_BETTER.includes(kpiMetric.toLowerCase()))}${liveValue != null && snapshotDate ? ` · as of ${snapshotDate}` : ''}`}
+            </div>
           </div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(2rem, 2vw + 1rem, 2.8rem)', lineHeight: 1.1, letterSpacing: '-0.05em' }}>
-            {campaignName}
-          </h1>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, width: 'fit-content', padding: '8px 12px', borderRadius: 999, background: 'rgba(32, 55, 47, 0.9)', border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.goldSoft, fontSize: 13 }}>
-            <span style={{ opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.12em' }}>{kpiMetric}</span>
-            <span style={{ fontWeight: 700, color: PALETTE.parchment }}>{kpiTarget.toLocaleString()}€</span>
-            <span style={{ opacity: 0.7 }}>target</span>
+          <div className="tree-kpi-target" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: 'fit-content', padding: '8px 12px', borderRadius: 999, background: 'rgba(32, 55, 47, 0.9)', border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.goldSoft, fontSize: 13 }}>
+            <span style={{ opacity: 0.85, letterSpacing: '0.04em' }}>{kpiMetric.toUpperCase()}</span>
+            <span style={{ opacity: 0.7 }}>target:</span>
+            <span style={{ fontWeight: 700, color: PALETTE.parchment }}>{kpiTarget.toLocaleString('en-US')}€</span>
           </div>
         </header>
 
@@ -319,7 +368,7 @@ export default function TreeView({
               <path d="M 384 535 C 397 525 424 521 450 521 C 476 521 503 525 516 535" fill="none" stroke="#B77D5B" strokeWidth="2" opacity="0.72" />
               <ellipse cx="450" cy="537" rx="59" ry="12" fill={PALETTE.soil} />
 
-              <FoliageShoots trunkTop={trunkTop} />
+              <FoliageShoots trunkTop={trunkTop} mood={foliageMood} />
               <path d={buildTrunkPath(trunkTop)} fill={PALETTE.bark} />
               <g clipPath="url(#trunkClip)" fill="none" strokeLinecap="round">
                 <path d={buildTrunkTexturePath(trunkTop, -10)} stroke={PALETTE.barkDeep} strokeWidth="3" opacity="0.56" />
@@ -327,17 +376,32 @@ export default function TreeView({
                 <path d={buildTrunkTexturePath(trunkTop, 5)} stroke={PALETTE.barkDeep} strokeWidth="2" opacity="0.46" />
                 <path d={buildTrunkTexturePath(trunkTop, 11)} stroke="#80604A" strokeWidth="3" opacity="0.24" />
               </g>
-              <CrownShoot trunkTop={trunkTop} />
+              <CrownShoot trunkTop={trunkTop} mood={foliageMood} />
 
               {branches.map((b) => {
                 const angle = b.tip.x < b.attach.x ? -35 : 35;
-                const isActive = activeId === b.id;
+                const isPreviewed = hoveredId === b.id || focusedId === b.id;
+                const isActive = activeId === b.id || isPreviewed;
+                const statusColor = b.status === 'above'
+                  ? PALETTE.sage
+                  : b.status === 'below'
+                    ? PALETTE.optimization
+                    : PALETTE.gold;
+                const tooltipWidth = 136;
+                const tooltipX = b.tip.x < b.attach.x
+                  ? b.tip.x - tooltipWidth - 16
+                  : b.tip.x + 16;
+                const tooltipY = b.tip.y - 48;
                 return (
                   <g
                     key={b.id}
                     role="button"
                     tabIndex={0}
                     aria-label={`${b.change_type} on ${b.change_date}`}
+                    onMouseEnter={() => setHoveredId(b.id)}
+                    onMouseLeave={() => setHoveredId(null)}
+                    onFocus={() => setFocusedId(b.id)}
+                    onBlur={() => setFocusedId(null)}
                     onClick={() => setActiveId((prev) => (prev === b.id ? null : b.id))}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
@@ -350,19 +414,58 @@ export default function TreeView({
                     <path
                       d={branchPath(b)}
                       fill="none"
-                      stroke={PALETTE.optimization}
+                      stroke="transparent"
+                      strokeWidth={24}
+                      strokeLinecap="round"
+                      pointerEvents="stroke"
+                      aria-hidden="true"
+                    />
+                    <path
+                      d={branchPath(b)}
+                      fill="none"
+                      stroke={statusColor}
                       strokeWidth={isActive ? 7 : 5}
                       strokeLinecap="round"
+                      opacity={isActive ? 1 : 0.88}
+                    />
+                    <circle
+                      cx={b.tip.x}
+                      cy={b.tip.y}
+                      r={isActive ? 11 : 8}
+                      fill="none"
+                      stroke={PALETTE.parchment}
+                      strokeWidth={isActive ? 2.5 : 1.8}
+                      opacity={isActive ? 1 : 0.78}
                     />
                     <JadeLeafPair x={b.tip.x} y={b.tip.y} angle={angle} scale={0.95} />
                     <circle
                       cx={b.attach.x}
                       cy={b.attach.y}
                       r={isActive ? 6 : 4.5}
-                      fill={PALETTE.optimization}
+                      fill={statusColor}
                       stroke={isActive ? PALETTE.parchment : 'transparent'}
                       strokeWidth={isActive ? 1.2 : 0}
                     />
+                    {isPreviewed && (
+                      <g role="tooltip" pointerEvents="none">
+                        <rect
+                          x={tooltipX}
+                          y={tooltipY}
+                          width={tooltipWidth}
+                          height={38}
+                          rx={6}
+                          fill={PALETTE.panel}
+                          stroke={statusColor}
+                          strokeWidth={1}
+                        />
+                        <text x={tooltipX + 9} y={tooltipY + 15} fill={PALETTE.muted} fontSize={10}>
+                          {b.change_date}
+                        </text>
+                        <text x={tooltipX + 9} y={tooltipY + 30} fill={PALETTE.parchment} fontSize={11} fontWeight={600}>
+                          {b.change_type.replace(/_/g, ' ')}
+                        </text>
+                      </g>
+                    )}
                   </g>
                 );
               })}
@@ -370,6 +473,20 @@ export default function TreeView({
               <path d="M 392 537 C 420 550 480 550 508 537" fill="none" stroke="#78634D" strokeWidth="3" opacity="0.9" />
               <path d="M 384 537 C 384 547 414 554 450 554 C 486 554 516 547 516 537" fill="none" stroke="#7D8980" strokeWidth="2" opacity="0.9" />
             </svg>
+            <div aria-label="Plant status legend" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 20px', padding: '8px 4px 0', color: PALETTE.muted, fontSize: 12 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: PALETTE.sage }} />
+                Better than target
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: PALETTE.optimization }} />
+                Worse than target
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <span aria-hidden="true" style={{ width: 18, borderTop: `1px dashed ${PALETTE.gold}` }} />
+                Target
+              </span>
+            </div>
           </section>
 
           <aside
@@ -391,20 +508,34 @@ export default function TreeView({
                   <span style={{ color: PALETTE.muted, fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                     {active.change_date}
                   </span>
-                  <span
-                    style={{
-                      background: active.status === 'above' ? 'rgba(127, 180, 125, 0.12)' : 'rgba(208, 124, 90, 0.14)',
-                      color: active.status === 'above' ? PALETTE.sage : PALETTE.rust,
-                      border: `1px solid ${active.status === 'above' ? 'rgba(127, 180, 125, 0.32)' : 'rgba(208, 124, 90, 0.32)'}`,
-                      borderRadius: 999,
-                      padding: '5px 9px',
-                      fontSize: 11,
-                      letterSpacing: '0.08em',
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {active.status === 'above' ? 'Healthy' : 'Needs attention'}
-                  </span>
+                  {(() => {
+                    const statusColor = active.status === 'above'
+                      ? PALETTE.sage
+                      : active.status === 'below'
+                        ? PALETTE.optimization
+                        : PALETTE.gold;
+                    const statusLabel = active.status === 'above'
+                      ? 'Better than target'
+                      : active.status === 'below'
+                        ? 'Worse than target'
+                        : 'On target';
+                    return (
+                      <span
+                        style={{
+                          background: active.status === 'above' ? 'rgba(150, 196, 154, 0.12)' : active.status === 'below' ? 'rgba(222, 135, 54, 0.14)' : 'rgba(217, 183, 106, 0.12)',
+                          color: statusColor,
+                          border: `1px solid ${statusColor}55`,
+                          borderRadius: 999,
+                          padding: '5px 9px',
+                          fontSize: 11,
+                          letterSpacing: '0.08em',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {statusLabel}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 <div>

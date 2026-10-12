@@ -25,6 +25,18 @@ export default async function TreePage() {
     .select('id, change_date, change_type, comment, metric_before, metric_after')
     .eq('campaign_id', campaign.id)
     .order('change_date', { ascending: true });
+  
+  const { data: snaps } = await supabase
+    .from('insight_snapshots')
+    .select('*')
+    .eq('campaign_id', campaign.id)
+    .order('snapshot_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  const latest = snaps?.[0];
+  const rawValue = latest ? latest[campaign.kpi_metric] : null;
+  const liveValue = rawValue != null ? Number(rawValue) : null;
 
   return (
     <TreeView
@@ -32,6 +44,8 @@ export default async function TreePage() {
       kpiMetric={campaign.kpi_metric}
       kpiTarget={campaign.kpi_target}
       changes={changes ?? []}
+      liveValue={liveValue}
+      snapshotDate={latest?.snapshot_date ?? null}
     />
   );
 }
