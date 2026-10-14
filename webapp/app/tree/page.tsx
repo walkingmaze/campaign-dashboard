@@ -48,6 +48,7 @@ export default async function TreePage({
   return (
     <TreeView
       campaignName={campaign.name}
+      campaignId={campaign.id}
       kpiMetric={campaign.kpi_metric}
       kpiTarget={campaign.kpi_target}
       changes={changes ?? []}

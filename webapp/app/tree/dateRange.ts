@@ -79,6 +79,8 @@ export function kpiFromTotals(metric: string, t: Totals | null): number | null {
   switch (metric.toLowerCase()) {
     case 'cpm': return t.cpm;
     case 'cpc': return t.clicks > 0 ? t.spend / t.clicks : null;
+    case 'cpv':
+    case 'cpa': return null;
     case 'ctr': return t.impressions > 0 ? (t.clicks / t.impressions) * 100 : null;
     default: return null;
   }

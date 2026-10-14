@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import DateRangePicker from './DateRangePicker';
+import KpiControls from './KpiControls';
 import type { ResolvedRange, Totals } from './dateRange';
 
 const PALETTE = {
@@ -34,7 +35,7 @@ const PALETTE = {
   shadow: 'rgba(6, 12, 10, 0.45)',
 };
 
-const LOWER_IS_BETTER = ['cpm', 'cpc', 'cpa'];
+const LOWER_IS_BETTER = ['cpm', 'cpc', 'cpv', 'cpa'];
 const HEALTH_Y = 260;
 const TRUNK_BASE = { x: 450, y: 540 };
 const TRUNK_WIGGLE = [
@@ -151,10 +152,16 @@ function clamp(value: number, min: number, max: number) {
 
 function computeLayout(changes: Change[], kpiTarget: number, kpiMetric: string, liveValue: number | null) {
   const lowerBetter = LOWER_IS_BETTER.includes(kpiMetric.toLowerCase());
-  const relativePerformance = (value: number) => lowerBetter
-    ? (kpiTarget - value) / kpiTarget
-    : (value - kpiTarget) / kpiTarget;
-  const latestChange = [...changes].reverse().find((change) => change.metric_after != null || change.metric_before != null);
+  const relativePerformance = (value: number) => {
+    if (kpiTarget === 0) return value === 0 ? 0 : lowerBetter ? -1 : 1;
+    return lowerBetter
+      ? (kpiTarget - value) / kpiTarget
+      : (value - kpiTarget) / kpiTarget;
+  };
+  const hasHistoricalKpiValues = !['cpv', 'cpa'].includes(kpiMetric.toLowerCase());
+  const latestChange = hasHistoricalKpiValues
+    ? [...changes].reverse().find((change) => change.metric_after != null || change.metric_before != null)
+    : undefined;
   const currentValue = liveValue ?? latestChange?.metric_after ?? latestChange?.metric_before ?? null;
   const latestValue = currentValue ?? kpiTarget;
   const foliageMood: FoliageMood = relativePerformance(latestValue) >= 0 ? 'sage' : 'olive';
@@ -274,6 +281,7 @@ function CrownShoot({ trunkTop, mood }: { trunkTop: number; mood: FoliageMood })
 
 export default function TreeView({
   campaignName,
+  campaignId,
   kpiMetric,
   kpiTarget,
   changes,
@@ -282,6 +290,7 @@ export default function TreeView({
   totals,
 }: {
   campaignName: string;
+  campaignId: string;
   kpiMetric: string;
   kpiTarget: number;
   changes: Change[];
@@ -321,13 +330,13 @@ export default function TreeView({
                 : `${kpiMetric.toUpperCase()} ${formatMetric(currentValue)} · ${formatTargetDelta(currentValue, kpiTarget, LOWER_IS_BETTER.includes(kpiMetric.toLowerCase()))} · ${range.label}`}
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+          <div className="tree-kpi-settings">
             <DateRangePicker range={range} />
-            <div className="tree-kpi-target" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: 'fit-content', padding: '8px 12px', borderRadius: 999, background: 'rgba(32, 55, 47, 0.9)', border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.goldSoft, fontSize: 13 }}>
-              <span style={{ opacity: 0.85, letterSpacing: '0.04em' }}>{kpiMetric.toUpperCase()}</span>
-              <span style={{ opacity: 0.7 }}>target:</span>
-              <span style={{ fontWeight: 700, color: PALETTE.parchment }}>{kpiTarget.toLocaleString('en-US')}€</span>
-            </div>
+            <KpiControls
+              campaignId={campaignId}
+              initialMetric={kpiMetric}
+              initialTarget={kpiTarget}
+            />
           </div>
         </header>
 

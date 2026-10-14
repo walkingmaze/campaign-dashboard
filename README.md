@@ -13,6 +13,8 @@ In paid social, optimizations are often tracked in a spreadsheet, and people ope
 - Form to log an optimization (type, date, comment, KPI before and after)
 - Plant view: each branch is one optimization. Sage = better than target, orange = worse, dashed gold line = KPI target
 - Live KPI status with the distance to target, taken from the latest sync
+- Editable campaign KPI settings on the plant page: choose CPC, CPM, CPV, or CPA and save a euro target
+- CPV and CPA selections show no live value until video-view or conversion data is available
 - Email alert when a campaign drops below its KPI target (sent once, until it recovers)
 - Playwright smoke tests
 

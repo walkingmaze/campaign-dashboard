@@ -22,7 +22,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), sans-serif;
 }
 
 .tree-header {
@@ -38,10 +38,107 @@ body {
   min-width: 0;
 }
 
-.tree-kpi-target {
+.tree-kpi-settings {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
   flex-shrink: 0;
   margin-top: 6px;
   margin-left: auto;
+}
+
+.tree-kpi-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tree-kpi-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 7px 13px;
+  border: 1px solid rgba(217, 183, 106, 0.72);
+  border-radius: 999px;
+  background: rgba(217, 183, 106, 0.12);
+  color: #F0D9A3;
+  font-size: 13px;
+}
+
+.tree-kpi-pill-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tree-kpi-pill select,
+.tree-kpi-target-entry input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #F3EFE6;
+  font: inherit;
+}
+
+.tree-kpi-pill select {
+  min-width: 56px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.tree-kpi-pill select option {
+  color: #F3EFE6;
+  background: #122a23;
+}
+
+.tree-kpi-target-entry {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  color: #F3EFE6;
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.tree-kpi-target-entry input {
+  width: 78px;
+  padding: 0;
+  font-size: 17px;
+  font-weight: 750;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tree-kpi-target-entry input::-webkit-inner-spin-button,
+.tree-kpi-target-entry input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.tree-kpi-pill:focus-within {
+  outline: 2px solid #F0D9A3;
+  outline-offset: 3px;
+}
+
+.tree-kpi-save-status {
+  max-width: 300px;
+  min-height: 1em;
+  color: #F0D9A3;
+  font-size: 12px;
+  text-align: right;
+}
+
+.tree-kpi-save-status:empty {
+  display: none;
+}
+
+.tree-kpi-save-status[role="alert"] {
+  color: #F0A28A;
 }
 
 @media (max-width: 560px) {
@@ -49,7 +146,7 @@ body {
     flex-wrap: wrap;
   }
 
-  .tree-kpi-target {
+  .tree-kpi-settings {
     margin-top: 4px;
   }
 }
