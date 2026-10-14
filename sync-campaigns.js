@@ -55,28 +55,42 @@ async function main() {
       console.log(`Inserted new campaign: ${c.name}`);
     }
 
-    // 4. Pull insights for this campaign
+       // 4. Pull daily insights (one row per day) for this campaign
     const insightsRes = await axios.get(
       `https://graph.facebook.com/${apiVersion}/${c.id}/insights`,
-      { params: { access_token: metaToken, fields: 'spend,cpm,clicks,impressions' } }
+      {
+        params: {
+          access_token: metaToken,
+          fields: 'spend,cpm,clicks,impressions',
+          date_preset: 'maximum',
+          time_increment: 1,
+          limit: 500,
+        },
+      }
     );
 
-    const insight = insightsRes.data.data[0];
-    if (insight) {
-      const { error: snapErr } = await supabase.from('insight_snapshots').insert({
-        campaign_id: campaignRowId,
-        snapshot_date: new Date().toISOString().slice(0, 10),
-        spend: insight.spend,
-        cpm: insight.cpm,
-        clicks: insight.clicks,
-        impressions: insight.impressions,
-      });
+    const rows = insightsRes.data.data.map((d) => ({
+      campaign_id: campaignRowId,
+      snapshot_date: d.date_start,
+      spend: d.spend,
+      cpm: d.cpm,
+      clicks: d.clicks,
+      impressions: d.impressions,
+    }));
+
+    if (rows.length) {
+      const { error: snapErr } = await supabase
+        .from('insight_snapshots')
+        .upsert(rows, { onConflict: 'campaign_id,snapshot_date' });
       if (snapErr) throw snapErr;
-      console.log(`Snapshot saved for: ${c.name}`);
+      console.log(`${rows.length} daily rows saved for: ${c.name}`);
     } else {
       console.log(`No insights yet for: ${c.name}`);
     }
   }
 }
 
-main().catch((err) => console.error('Error:', err.message || err));
+main().catch((err) => {
+  console.error('Error:', err.response?.data?.error?.message || err.message || err);
+  process.exit(1);
+});
