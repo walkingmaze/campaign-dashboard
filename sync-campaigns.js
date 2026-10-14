@@ -33,8 +33,9 @@ async function main() {
 
     let campaignRowId;
 
-    if (existing) {
+        if (existing) {
       campaignRowId = existing.id;
+      await supabase.from('campaigns').update({ name: c.name }).eq('id', existing.id);
       console.log(`Campaign already exists: ${c.name}`);
     } else {
       // Insert new campaign with placeholder KPI values —
