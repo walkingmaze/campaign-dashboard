@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import DateRangePicker from './DateRangePicker';
+import type { ResolvedRange, Totals } from './dateRange';
 
 const PALETTE = {
   bg: '#0b1c17',
@@ -276,14 +278,16 @@ export default function TreeView({
   kpiTarget,
   changes,
   liveValue,
-  snapshotDate,
+  range,
+  totals,
 }: {
   campaignName: string;
   kpiMetric: string;
   kpiTarget: number;
   changes: Change[];
   liveValue: number | null;
-  snapshotDate: string | null;
+  range: ResolvedRange;
+  totals: Totals | null;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -303,7 +307,7 @@ export default function TreeView({
       }}
     >
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <header className="tree-header" style={{ marginBottom: 20 }}>
+                <header className="tree-header" style={{ marginBottom: 20 }}>
           <div className="tree-header-copy">
             <div style={{ color: PALETTE.muted, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
               Campaign overview
@@ -313,16 +317,35 @@ export default function TreeView({
             </h1>
             <div aria-label="Current KPI status" style={{ color: foliageMood === 'sage' ? PALETTE.sage : PALETTE.optimization, fontSize: 13, lineHeight: 1.5 }}>
               {currentValue == null
-                ? `No logged ${kpiMetric.toUpperCase()} value yet`
-                : `${kpiMetric.toUpperCase()} now ${formatMetric(currentValue)} · ${formatTargetDelta(currentValue, kpiTarget, LOWER_IS_BETTER.includes(kpiMetric.toLowerCase()))}${liveValue != null && snapshotDate ? ` · as of ${snapshotDate}` : ''}`}
+                ? `No ${kpiMetric.toUpperCase()} data in ${range.label}`
+                : `${kpiMetric.toUpperCase()} ${formatMetric(currentValue)} · ${formatTargetDelta(currentValue, kpiTarget, LOWER_IS_BETTER.includes(kpiMetric.toLowerCase()))} · ${range.label}`}
             </div>
           </div>
-          <div className="tree-kpi-target" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: 'fit-content', padding: '8px 12px', borderRadius: 999, background: 'rgba(32, 55, 47, 0.9)', border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.goldSoft, fontSize: 13 }}>
-            <span style={{ opacity: 0.85, letterSpacing: '0.04em' }}>{kpiMetric.toUpperCase()}</span>
-            <span style={{ opacity: 0.7 }}>target:</span>
-            <span style={{ fontWeight: 700, color: PALETTE.parchment }}>{kpiTarget.toLocaleString('en-US')}€</span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+            <DateRangePicker range={range} />
+            <div className="tree-kpi-target" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: 'fit-content', padding: '8px 12px', borderRadius: 999, background: 'rgba(32, 55, 47, 0.9)', border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.goldSoft, fontSize: 13 }}>
+              <span style={{ opacity: 0.85, letterSpacing: '0.04em' }}>{kpiMetric.toUpperCase()}</span>
+              <span style={{ opacity: 0.7 }}>target:</span>
+              <span style={{ fontWeight: 700, color: PALETTE.parchment }}>{kpiTarget.toLocaleString('en-US')}€</span>
+            </div>
           </div>
         </header>
+
+        {totals && (
+          <div aria-label="Performance totals" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+            {[
+              ['Spend', `${totals.spend.toLocaleString('en-US', { maximumFractionDigits: 2 })}€`],
+              ['Impressions', totals.impressions.toLocaleString('en-US')],
+              ['Clicks', totals.clicks.toLocaleString('en-US')],
+              ['CPM', totals.cpm == null ? '—' : `${totals.cpm.toFixed(2)}€`],
+            ].map(([name, value]) => (
+              <div key={name} style={{ minWidth: 120, padding: '10px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: `1px solid ${PALETTE.panelBorder}` }}>
+                <div style={{ color: PALETTE.muted, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase' }}>{name}</div>
+                <div style={{ marginTop: 4, fontSize: 18, fontWeight: 700 }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="tree-layout" style={{ display: 'grid', gap: 20, alignItems: 'stretch' }}>
           <section
