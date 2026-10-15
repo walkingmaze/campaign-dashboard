@@ -46,6 +46,10 @@ webapp/
       ChangeForm.tsx
       page.tsx
     tree/
+      actions.ts
+      dateRange.ts
+      DateRangePicker.tsx
+      KpiControls.tsx
       page.tsx
       TreeView.tsx
     favicon.ico
@@ -58,12 +62,15 @@ webapp/
     next.svg
     vercel.svg
     window.svg
+  tests/
+    smoke.spec.ts
   .gitignore
   AGENTS.md
   CLAUDE.md
   eslint.config.mjs
   next.config.ts
   package.json
+  playwright.config.ts
   postcss.config.mjs
   README.md
   tsconfig.json
@@ -283,6 +290,254 @@ export default async function ChangesPage() {
 }
 ````
 
+## File: webapp/app/tree/actions.ts
+````typescript
+'use server';
+
+import { createClient } from '@supabase/supabase-js';
+import { revalidatePath } from 'next/cache';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+const KPI_METRICS = ['cpc', 'cpm', 'cpv', 'cpa'] as const;
+
+export async function updateCampaignKpi(
+  campaignId: string,
+  metric: string,
+  target: number
+) {
+  if (!campaignId || !(KPI_METRICS as readonly string[]).includes(metric)) {
+    throw new Error('Choose a valid KPI metric.');
+  }
+
+  if (!Number.isFinite(target) || target < 0) {
+    throw new Error('Target must be a non-negative number.');
+  }
+
+  const { data, error } = await supabase
+    .from('campaigns')
+    .update({ kpi_metric: metric, kpi_target: target })
+    .eq('id', campaignId)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Could not save the KPI settings: ${error.message}`);
+  }
+  if (!data) {
+    throw new Error('Campaign not found. The KPI settings were not saved.');
+  }
+
+  revalidatePath('/tree');
+  revalidatePath('/campaigns');
+}
+````
+
+## File: webapp/app/tree/DateRangePicker.tsx
+````typescript
+'use client';
+
+import { useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { PRESETS } from './dateRange';
+import type { ResolvedRange } from './dateRange';
+
+export default function DateRangePicker({ range }: { range: ResolvedRange }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const [customFrom, setCustomFrom] = useState(range.id === 'custom' ? range.from : '');
+  const [customTo, setCustomTo] = useState(range.id === 'custom' ? range.to : '');
+
+  function choose(id: string) {
+    setOpen(false);
+    router.push(`${pathname}?range=${id}`);
+  }
+
+  function applyCustom() {
+    if (!customFrom || !customTo) return;
+    setOpen(false);
+    router.push(`${pathname}?range=custom&from=${customFrom}&to=${customTo}`);
+  }
+
+  const inputStyle = {
+    background: '#0e1f1a',
+    color: '#F3EFE6',
+    border: '1px solid #29453a',
+    borderRadius: 8,
+    padding: '6px 8px',
+    colorScheme: 'dark' as const,
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        aria-label={`Date range: ${range.label}`}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 999, background: 'rgba(32, 55, 47, 0.9)', border: '1px solid #29453a', color: '#F3EFE6', fontSize: 13, cursor: 'pointer' }}
+      >
+        <span>{range.label}</span>
+        <span style={{ opacity: 0.7 }}>{range.text}</span>
+      </button>
+
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 10 }} />
+          <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', zIndex: 11, width: 270, padding: 12, borderRadius: 14, background: '#122a23', border: '1px solid #29453a', boxShadow: '0 18px 40px rgba(6, 12, 10, 0.45)', display: 'grid', gap: 4 }}>
+            {PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => choose(p.id)}
+                style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 14, background: p.id === range.id ? 'rgba(150, 196, 154, 0.16)' : 'transparent', color: p.id === range.id ? '#96C49A' : '#F3EFE6' }}
+              >
+                {p.label}
+              </button>
+            ))}
+            <div style={{ borderTop: '1px solid #29453a', marginTop: 6, paddingTop: 10, display: 'grid', gap: 8 }}>
+              <div style={{ fontSize: 12, color: '#9bb0a5' }}>Custom range</div>
+              <input type="date" aria-label="Start date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} style={inputStyle} />
+              <input type="date" aria-label="End date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} style={inputStyle} />
+              <button
+                type="button"
+                onClick={applyCustom}
+                disabled={!customFrom || !customTo}
+                style={{ padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600, background: '#96C49A', color: '#0b1c17', opacity: !customFrom || !customTo ? 0.5 : 1 }}
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+````
+
+## File: webapp/app/tree/KpiControls.tsx
+````typescript
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { updateCampaignKpi } from './actions';
+
+const KPI_METRICS = ['cpc', 'cpm', 'cpv', 'cpa'] as const;
+
+export default function KpiControls({
+  campaignId,
+  initialMetric,
+  initialTarget,
+}: {
+  campaignId: string;
+  initialMetric: string;
+  initialTarget: number;
+}) {
+  const router = useRouter();
+  const [metric, setMetric] = useState(initialMetric.toLowerCase());
+  const [target, setTarget] = useState(String(initialTarget));
+  const [savedTarget, setSavedTarget] = useState(String(initialTarget));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function save(nextMetric: string, targetValue: string): Promise<boolean> {
+    if (!targetValue.trim()) {
+      setError('Enter a valid target of zero or more euros.');
+      setMessage('');
+      return false;
+    }
+    const numericTarget = Number(targetValue);
+    if (!Number.isFinite(numericTarget) || numericTarget < 0) {
+      setError('Enter a valid target of zero or more euros.');
+      setMessage('');
+      return false;
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('Saving KPI settings…');
+    try {
+      await updateCampaignKpi(campaignId, nextMetric, numericTarget);
+      setSavedTarget(targetValue);
+      setMessage('KPI settings saved.');
+      router.refresh();
+      return true;
+    } catch (saveError) {
+      setMessage('');
+      setError(saveError instanceof Error ? saveError.message : 'Could not save KPI settings.');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleTargetBlur() {
+    if (target !== savedTarget) void save(metric, target);
+  }
+
+  return (
+    <div className="tree-kpi-controls" aria-label="Campaign KPI settings">
+      <label className="tree-kpi-pill tree-kpi-pill--metric">
+        <span className="tree-kpi-pill-label">KPI</span>
+        <select
+          aria-label="KPI metric"
+          disabled={saving}
+          value={metric}
+          onChange={(event) => {
+            const nextMetric = event.target.value;
+            const previousMetric = metric;
+            setMetric(nextMetric);
+            void save(nextMetric, target).then((saved) => {
+              if (!saved) setMetric(previousMetric);
+            });
+          }}
+        >
+          {KPI_METRICS.map((option) => (
+            <option key={option} value={option}>{option.toUpperCase()}</option>
+          ))}
+        </select>
+      </label>
+
+      <label className="tree-kpi-pill tree-kpi-pill--target">
+        <span className="tree-kpi-pill-label">Target</span>
+        <span className="tree-kpi-target-entry">
+          <input
+            aria-label="Target amount in euros"
+            disabled={saving}
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            type="number"
+            value={target}
+            onChange={(event) => {
+              setTarget(event.target.value);
+              setMessage('Target changes save when you leave the field.');
+              setError('');
+            }}
+            onBlur={handleTargetBlur}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur();
+            }}
+          />
+          <span aria-hidden="true">€</span>
+        </span>
+      </label>
+
+      <span aria-live="polite" className="tree-kpi-save-status" role={error ? 'alert' : 'status'}>
+        {error || message}
+      </span>
+    </div>
+  );
+}
+````
+
 ## File: webapp/app/page.tsx
 ````typescript
 import Image from "next/image";
@@ -466,6 +721,24 @@ const eslintConfig = defineConfig([
 export default eslintConfig;
 ````
 
+## File: webapp/playwright.config.ts
+````typescript
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests',
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
+  use: { baseURL: 'http://localhost:3000' },
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:3000',
+    reuseExistingServer: true,
+    timeout: 120_000,
+  },
+});
+````
+
 ## File: webapp/postcss.config.mjs
 ````javascript
 const config = {
@@ -555,86 +828,6 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 }
 ````
 
-## File: .gitignore
-````
-node_modules/
-.env*
-.github/agents/
-.github/hooks/
-.github/skills/
-````
-
-## File: check-kpi.js
-````javascript
-const { createClient } = require('@supabase/supabase-js');
-
-const LOWER_IS_BETTER = ['cpm', 'cpc', 'cpa'];
-
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const ALERT_EMAIL_TO = process.env.ALERT_EMAIL_TO;
-
-async function sendAlertEmail(campaign, value) {
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: 'onboarding@resend.dev',
-      to: ALERT_EMAIL_TO,
-      subject: `⚠️ ${campaign.name} is below ${campaign.kpi_metric.toUpperCase()} target`,
-      html: `<p><strong>Metric:</strong> ${campaign.kpi_metric.toUpperCase()}</p>
-             <p><strong>Target:</strong> ${campaign.kpi_target}€</p>
-             <p><strong>Current:</strong> ${value}€</p>
-             <p>Logged automatically by the daily sync.</p>`,
-    }),
-  });
-  if (!res.ok) throw new Error(`Resend API error ${res.status}: ${await res.text()}`);
-  console.log(`Sent alert email for ${campaign.name}`);
-}
-
-async function main() {
-  const { data: campaigns, error } = await supabase.from('campaigns').select('*');
-  if (error) throw error;
-
-  for (const campaign of campaigns) {
-    const { data: snapshots, error: snapErr } = await supabase
-      .from('insight_snapshots')
-      .select('*')
-      .eq('campaign_id', campaign.id)
-      .order('snapshot_date', { ascending: false })
-      .limit(1);
-    if (snapErr) throw snapErr;
-    if (!snapshots.length) continue;
-
-    const value = snapshots[0][campaign.kpi_metric];
-    if (value == null) continue;
-
-    const lowerBetter = LOWER_IS_BETTER.includes(campaign.kpi_metric.toLowerCase());
-    const isBelowTarget = lowerBetter ? value > campaign.kpi_target : value < campaign.kpi_target;
-
-    if (isBelowTarget) {
-      if (campaign.kpi_alert_sent) {
-        console.log(`Already alerted for ${campaign.name}, skipping`);
-      } else {
-        await sendAlertEmail(campaign, value);
-        await supabase.from('campaigns').update({ kpi_alert_sent: true }).eq('id', campaign.id);
-      }
-    } else if (campaign.kpi_alert_sent) {
-      // back above target — re-arm for next time it dips
-      await supabase.from('campaigns').update({ kpi_alert_sent: false }).eq('id', campaign.id);
-    }
-  }
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
-````
-
 ## File: fetch-campaigns.js
 ````javascript
 const axios = require('axios');
@@ -689,149 +882,94 @@ main();
 }
 ````
 
-## File: README.md
-````markdown
-# campaign-dashboard
-````
+## File: webapp/app/tree/dateRange.ts
+````typescript
+export type RangeId =
+  | 'today' | 'yesterday' | 'last7' | 'last30'
+  | 'thisMonth' | 'lastMonth' | 'maximum' | 'custom';
 
-## File: sync-campaigns.js
-````javascript
-const axios = require('axios');
-const { createClient } = require('@supabase/supabase-js');
+export const PRESETS: { id: RangeId; label: string }[] = [
+  { id: 'today', label: 'Today' },
+  { id: 'yesterday', label: 'Yesterday' },
+  { id: 'last7', label: 'Last 7 days' },
+  { id: 'last30', label: 'Last 30 days' },
+  { id: 'thisMonth', label: 'This month' },
+  { id: 'lastMonth', label: 'Last month' },
+  { id: 'maximum', label: 'Maximum' },
+];
 
-const metaToken = process.env.META_ACCESS_TOKEN;
-const apiVersion = 'v21.0';
+export type ResolvedRange = { id: RangeId; label: string; text: string; from: string; to: string };
+export type Totals = { spend: number; impressions: number; clicks: number; cpm: number | null };
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d));
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const fmt = (d: Date) =>
+  d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
-async function main() {
-  // 1. Get your ad account
-  const accountsRes = await axios.get(
-    `https://graph.facebook.com/${apiVersion}/me/adaccounts`,
-    { params: { access_token: metaToken, fields: 'id,name' } }
-  );
-  const adAccountId = accountsRes.data.data[0].id;
+export function resolveRange(id?: string, from?: string, to?: string): ResolvedRange {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  const today = utc(y, m, d);
+  const yesterday = utc(y, m, d - 1);
 
-  // 2. Get campaigns in that account
-  const campaignsRes = await axios.get(
-    `https://graph.facebook.com/${apiVersion}/${adAccountId}/campaigns`,
-    { params: { access_token: metaToken, fields: 'id,name,status' } }
-  );
+  let rangeId: RangeId = PRESETS.some((p) => p.id === id) || id === 'custom' ? (id as RangeId) : 'maximum';
+  let start: Date;
+  let end: Date;
 
-  for (const c of campaignsRes.data.data) {
-    // 3. Check if this campaign already exists in Supabase
-    const { data: existing } = await supabase
-      .from('campaigns')
-      .select('id')
-      .eq('meta_campaign_id', c.id)
-      .maybeSingle();
-
-    let campaignRowId;
-
-    if (existing) {
-      campaignRowId = existing.id;
-      console.log(`Campaign already exists: ${c.name}`);
-    } else {
-      // Insert new campaign with placeholder KPI values —
-      // update kpi_metric/kpi_target manually in Supabase's Table Editor afterward
-      const { data: inserted, error } = await supabase
-        .from('campaigns')
-        .insert({
-          meta_campaign_id: c.id,
-          name: c.name,
-          kpi_metric: 'ctr',
-          kpi_target: 1.8,
-        })
-        .select('id')
-        .single();
-
-      if (error) throw error;
-      campaignRowId = inserted.id;
-      console.log(`Inserted new campaign: ${c.name}`);
-    }
-
-    // 4. Pull insights for this campaign
-    const insightsRes = await axios.get(
-      `https://graph.facebook.com/${apiVersion}/${c.id}/insights`,
-      { params: { access_token: metaToken, fields: 'spend,cpm,clicks,impressions' } }
-    );
-
-    const insight = insightsRes.data.data[0];
-    if (insight) {
-      const { error: snapErr } = await supabase.from('insight_snapshots').insert({
-        campaign_id: campaignRowId,
-        snapshot_date: new Date().toISOString().slice(0, 10),
-        spend: insight.spend,
-        cpm: insight.cpm,
-        clicks: insight.clicks,
-        impressions: insight.impressions,
-      });
-      if (snapErr) throw snapErr;
-      console.log(`Snapshot saved for: ${c.name}`);
-    } else {
-      console.log(`No insights yet for: ${c.name}`);
-    }
+  switch (rangeId) {
+    case 'today': start = today; end = today; break;
+    case 'yesterday': start = yesterday; end = yesterday; break;
+    case 'last7': start = utc(y, m, d - 7); end = yesterday; break;
+    case 'last30': start = utc(y, m, d - 30); end = yesterday; break;
+    case 'thisMonth': start = utc(y, m, 1); end = today; break;
+    case 'lastMonth': start = utc(y, m - 1, 1); end = utc(y, m, 0); break;
+    case 'custom':
+      if (from && to && DAY.test(from) && DAY.test(to)) {
+        start = new Date(from);
+        end = new Date(to);
+        if (start > end) [start, end] = [end, start];
+      } else {
+        rangeId = 'maximum';
+        start = utc(2000, 0, 1);
+        end = today;
+      }
+      break;
+    default: start = utc(2000, 0, 1); end = today;
   }
+
+  const label = rangeId === 'custom' ? 'Custom' : PRESETS.find((p) => p.id === rangeId)!.label;
+  const text =
+    rangeId === 'maximum' ? 'all available data' : start.getTime() === end.getTime() ? fmt(start) : `${fmt(start)} – ${fmt(end)}`;
+
+  return { id: rangeId, label, text, from: iso(start), to: iso(end) };
 }
 
-main().catch((err) => console.error('Error:', err.message || err));
-````
-
-## File: webapp/app/tree/page.tsx
-````typescript
-import { createClient } from '@supabase/supabase-js';
-import TreeView from './TreeView';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-export default async function TreePage() {
-  // For now: just grab the first campaign. Once you have more than one,
-  // this becomes a dropdown/selector passing an id here instead.
-  const { data: campaigns } = await supabase
-    .from('campaigns')
-    .select('id, name, kpi_metric, kpi_target')
-    .limit(1);
-
-  const campaign = campaigns?.[0];
-
-  if (!campaign) {
-    return <div style={{ padding: 20 }}>No campaigns yet — run sync-campaigns.js first.</div>;
+export function sumRows(rows: { spend: unknown; impressions: unknown; clicks: unknown }[]): Totals | null {
+  if (!rows.length) return null;
+  let spend = 0;
+  let impressions = 0;
+  let clicks = 0;
+  for (const r of rows) {
+    spend += Number(r.spend) || 0;
+    impressions += Number(r.impressions) || 0;
+    clicks += Number(r.clicks) || 0;
   }
+  return { spend, impressions, clicks, cpm: impressions > 0 ? (spend / impressions) * 1000 : null };
+}
 
-  const { data: changes } = await supabase
-    .from('changes')
-    .select('id, change_date, change_type, comment, metric_before, metric_after')
-    .eq('campaign_id', campaign.id)
-    .order('change_date', { ascending: true });
-  
-  const { data: snaps } = await supabase
-    .from('insight_snapshots')
-    .select('*')
-    .eq('campaign_id', campaign.id)
-    .order('snapshot_date', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(1);
-
-  const latest = snaps?.[0];
-  const rawValue = latest ? latest[campaign.kpi_metric] : null;
-  const liveValue = rawValue != null ? Number(rawValue) : null;
-
-  return (
-    <TreeView
-      campaignName={campaign.name}
-      kpiMetric={campaign.kpi_metric}
-      kpiTarget={campaign.kpi_target}
-      changes={changes ?? []}
-      liveValue={liveValue}
-      snapshotDate={latest?.snapshot_date ?? null}
-    />
-  );
+export function kpiFromTotals(metric: string, t: Totals | null): number | null {
+  if (!t) return null;
+  switch (metric.toLowerCase()) {
+    case 'cpm': return t.cpm;
+    case 'cpc': return t.clicks > 0 ? t.spend / t.clicks : null;
+    case 'cpv':
+    case 'cpa': return null;
+    case 'ctr': return t.impressions > 0 ? (t.clicks / t.impressions) * 100 : null;
+    default: return null;
+  }
 }
 ````
 
@@ -898,35 +1036,119 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ````
 
-## File: webapp/package.json
-````json
-{
-  "name": "webapp",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.116.0",
-    "next": "16.3.5",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.5",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+## File: .gitignore
+````
+node_modules/
+.env*
+.github/agents/
+.github/hooks/
+.github/skills/
+test-results/
+playwright-report/
+````
+
+## File: check-kpi.js
+````javascript
+const { createClient } = require('@supabase/supabase-js');
+
+const LOWER_IS_BETTER = ['cpm', 'cpc', 'cpa'];
+const WINDOW_DAYS = 3;
+const MIN_IMPRESSIONS = 1000;
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const ALERT_EMAIL_TO = process.env.ALERT_EMAIL_TO;
+
+function isoDaysAgo(n) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+// KPI over a period = totals first, then the ratio (same as Ads Manager)
+function kpiFromRows(metric, rows) {
+  let spend = 0;
+  let impressions = 0;
+  let clicks = 0;
+  for (const r of rows) {
+    spend += Number(r.spend) || 0;
+    impressions += Number(r.impressions) || 0;
+    clicks += Number(r.clicks) || 0;
+  }
+  if (impressions < MIN_IMPRESSIONS) return null;
+
+  switch (metric.toLowerCase()) {
+    case 'cpm': return (spend / impressions) * 1000;
+    case 'cpc': return clicks > 0 ? spend / clicks : null;
+    case 'ctr': return (clicks / impressions) * 100;
+    default: return null;
   }
 }
+
+async function sendAlertEmail(campaign, value, from, to) {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: 'onboarding@resend.dev',
+      to: ALERT_EMAIL_TO,
+      subject: `⚠️ ${campaign.name} is worse than ${campaign.kpi_metric.toUpperCase()} target`,
+      html: `<p><strong>Metric:</strong> ${campaign.kpi_metric.toUpperCase()}</p>
+             <p><strong>Target:</strong> ${campaign.kpi_target}€</p>
+             <p><strong>Last ${WINDOW_DAYS} days (${from} to ${to}):</strong> ${value.toFixed(2)}€</p>
+             <p>Logged automatically by the daily sync.</p>`,
+    }),
+  });
+  if (!res.ok) throw new Error(`Resend API error ${res.status}: ${await res.text()}`);
+  console.log(`Sent alert email for ${campaign.name}`);
+}
+
+async function main() {
+  const from = isoDaysAgo(WINDOW_DAYS);
+  const to = isoDaysAgo(1);
+
+  const { data: campaigns, error } = await supabase.from('campaigns').select('*');
+  if (error) throw error;
+
+  for (const campaign of campaigns) {
+    const { data: rows, error: rowsErr } = await supabase
+      .from('insight_snapshots')
+      .select('spend, impressions, clicks')
+      .eq('campaign_id', campaign.id)
+      .gte('snapshot_date', from)
+      .lte('snapshot_date', to);
+    if (rowsErr) throw rowsErr;
+
+    const value = kpiFromRows(campaign.kpi_metric, rows ?? []);
+    if (value == null) {
+      console.log(`Not enough data in the last ${WINDOW_DAYS} days for ${campaign.name}, skipping`);
+      continue;
+    }
+
+    const lowerBetter = LOWER_IS_BETTER.includes(campaign.kpi_metric.toLowerCase());
+    const isWorse = lowerBetter ? value > campaign.kpi_target : value < campaign.kpi_target;
+
+    if (isWorse) {
+      if (campaign.kpi_alert_sent) {
+        console.log(`Already alerted for ${campaign.name}, skipping`);
+      } else {
+        await sendAlertEmail(campaign, value, from, to);
+        await supabase.from('campaigns').update({ kpi_alert_sent: true }).eq('id', campaign.id);
+      }
+    } else if (campaign.kpi_alert_sent) {
+      // back on target, re-arm for the next dip
+      await supabase.from('campaigns').update({ kpi_alert_sent: false }).eq('id', campaign.id);
+    }
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
 ````
 
 ## File: .github/workflows/sync-campaigns.yml
@@ -960,11 +1182,530 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 ````
 
+## File: webapp/tests/smoke.spec.ts
+````typescript
+import { test, expect } from '@playwright/test';
+
+test('navigation links reach the other pages', async ({ page }) => {
+  await page.goto('/campaigns');
+  await page.getByRole('link', { name: 'Log change' }).click();
+  await expect(page.getByRole('heading', { name: 'Log a change' })).toBeVisible();
+  await page.getByRole('link', { name: 'Plant' }).click();
+  await expect(page).toHaveURL(/\/tree/);
+});
+
+test('campaigns page lists a campaign with a KPI target in euro', async ({ page }) => {
+  await page.goto('/campaigns');
+  const firstRow = page.locator('tbody tr').first();
+  await expect(firstRow).toBeVisible();
+  await expect(firstRow).toContainText('€');
+});
+
+test('plant page shows the live KPI status and opens a branch', async ({ page }) => {
+  await page.goto('/tree');
+  await expect(page.getByLabel('Current KPI status')).toContainText(/CPM [\d.,]+€/);
+  const kpiMetric = page.getByLabel('KPI metric');
+  await expect(kpiMetric).toHaveValue('cpm');
+  await expect(kpiMetric.locator('option')).toHaveText(['CPC', 'CPM', 'CPV', 'CPA']);
+  const target = page.getByLabel('Target amount in euros');
+  await expect(target).toHaveValue('1');
+  const branches = page.getByRole('button', { name: / on \d{4}-\d{2}-\d{2}/ });
+  await expect(branches.first()).toBeVisible();
+  await branches.first().click();
+  await expect(page.getByText('Before', { exact: true })).toBeVisible();
+  await expect(page.getByText('After', { exact: true })).toBeVisible();
+});
+
+test('plant page rejects a negative KPI target without saving', async ({ page }) => {
+  await page.goto('/tree');
+  const target = page.getByLabel('Target amount in euros');
+  await target.fill('-1');
+  await target.press('Tab');
+  await expect(page.locator('.tree-kpi-save-status[role="alert"]')).toContainText('zero or more euros');
+});
+
+test('change form blocks submit when the date is missing', async ({ page }) => {
+  await page.goto('/changes');
+  await page.getByRole('button', { name: 'Log this change' }).click();
+  const dateMissing = await page
+    .locator('input[name="change_date"]')
+    .evaluate((el: HTMLInputElement) => el.validity.valueMissing);
+  expect(dateMissing).toBe(true);
+});
+
+test('date range picker switches the range', async ({ page }) => {
+  await page.goto('/tree');
+  await page.getByRole('button', { name: /date range/i }).click();
+  await page.getByRole('button', { name: 'Last 7 days' }).click();
+  await expect(page).toHaveURL(/range=last7/);
+  await expect(page.getByLabel('Current KPI status')).toContainText('Last 7 days');
+});
+````
+
+## File: webapp/package.json
+````json
+{
+  "name": "webapp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "next": "16.3.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+````
+
+## File: README.md
+````markdown
+# Meta-Plant
+
+A campaign changelog that grows. Meta-Plant shows the optimization history of a Meta Ads campaign as a jade plant: every logged optimization is a branch, and its color shows whether the KPI got better or worse.
+
+
+## Why
+
+In paid social, optimizations are often tracked in a spreadsheet, and people open a separate tab to check if a change worked. Meta-Plant puts the change and its effect in one picture.
+
+## Features
+
+- Daily automatic sync of campaign performance from the Meta Marketing API
+- Form to log an optimization (type, date, comment, KPI before and after)
+- Plant view: each branch is one optimization. Sage = better than target, orange = worse, dashed gold line = KPI target
+- Live KPI status with the distance to target, taken from the latest sync
+- Editable campaign KPI settings on the plant page: choose CPC, CPM, CPV, or CPA and save a euro target
+- CPV and CPA selections show no live value until video-view or conversion data is available
+- Email alert when a campaign drops below its KPI target (sent once, until it recovers)
+- Playwright smoke tests
+
+## How it works
+
+```
+Meta Marketing API
+        |
+GitHub Actions (daily, 06:00 UTC)
+        |
+sync-campaigns.js  -->  Supabase (Postgres)  -->  Next.js pages
+        |
+check-kpi.js  -->  alert email (Resend)
+```
+
+## Tech stack
+
+Next.js (App Router, TypeScript), Supabase, Meta Marketing API, GitHub Actions, Resend, Playwright.
+
+## Project structure
+
+```
+.github/workflows/sync-campaigns.yml   daily sync + KPI check
+sync-campaigns.js                      pulls Meta data into Supabase
+check-kpi.js                           sends an alert email if the KPI is below target
+fetch-campaigns.js                     read-only API test script
+webapp/                                Next.js app (/campaigns, /changes, /tree)
+webapp/tests/                          Playwright tests
+```
+
+## Data model
+
+Three tables: `campaigns` (KPI metric and target), `insight_snapshots` (one row per sync), `changes` (logged optimizations). Row Level Security is enabled; the app reads and writes on the server only.
+
+## Run locally
+
+Needs Node 22+, a Supabase project, and a Meta system user token with `ads_read`.
+
+Environment variables:
+
+```
+META_ACCESS_TOKEN
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY   (the Supabase secret key)
+RESEND_API_KEY
+ALERT_EMAIL_TO
+```
+
+```
+npm install
+node sync-campaigns.js
+cd webapp
+npm install
+npm run dev
+```
+
+## Tests
+
+```
+cd webapp
+npx playwright install chromium
+npm test
+```
+
+The four smoke tests only read data: page navigation, campaign list, plant page with live KPI status, and form validation.
+
+## Notes
+
+- Built with a personal test ad account and test campaign.
+- Internal prototype: there is no login yet, so do not deploy it publicly as it is.
+- Next: AI-written trend summary per campaign, more tests (form submit, alert logic).
+````
+
+## File: sync-campaigns.js
+````javascript
+const axios = require('axios');
+const { createClient } = require('@supabase/supabase-js');
+
+const metaToken = process.env.META_ACCESS_TOKEN;
+const apiVersion = 'v21.0';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+async function main() {
+  // 1. Get your ad account
+  const accountsRes = await axios.get(
+    `https://graph.facebook.com/${apiVersion}/me/adaccounts`,
+    { params: { access_token: metaToken, fields: 'id,name' } }
+  );
+  const adAccountId = accountsRes.data.data[0].id;
+
+  // 2. Get campaigns in that account
+  const campaignsRes = await axios.get(
+    `https://graph.facebook.com/${apiVersion}/${adAccountId}/campaigns`,
+    { params: { access_token: metaToken, fields: 'id,name,status' } }
+  );
+
+  for (const c of campaignsRes.data.data) {
+    // 3. Check if this campaign already exists in Supabase
+    const { data: existing } = await supabase
+      .from('campaigns')
+      .select('id')
+      .eq('meta_campaign_id', c.id)
+      .maybeSingle();
+
+    let campaignRowId;
+
+        if (existing) {
+      campaignRowId = existing.id;
+      await supabase.from('campaigns').update({ name: c.name }).eq('id', existing.id);
+      console.log(`Campaign already exists: ${c.name}`);
+    } else {
+      // Insert new campaign with placeholder KPI values —
+      // update kpi_metric/kpi_target manually in Supabase's Table Editor afterward
+      const { data: inserted, error } = await supabase
+        .from('campaigns')
+        .insert({
+          meta_campaign_id: c.id,
+          name: c.name,
+          kpi_metric: 'ctr',
+          kpi_target: 1.8,
+        })
+        .select('id')
+        .single();
+
+      if (error) throw error;
+      campaignRowId = inserted.id;
+      console.log(`Inserted new campaign: ${c.name}`);
+    }
+
+       // 4. Pull daily insights (one row per day) for this campaign
+    const insightsRes = await axios.get(
+      `https://graph.facebook.com/${apiVersion}/${c.id}/insights`,
+      {
+        params: {
+          access_token: metaToken,
+          fields: 'spend,cpm,clicks,impressions',
+          date_preset: 'maximum',
+          time_increment: 1,
+          limit: 500,
+        },
+      }
+    );
+
+    const rows = insightsRes.data.data.map((d) => ({
+      campaign_id: campaignRowId,
+      snapshot_date: d.date_start,
+      spend: d.spend,
+      cpm: d.cpm,
+      clicks: d.clicks,
+      impressions: d.impressions,
+    }));
+
+    if (rows.length) {
+      const { error: snapErr } = await supabase
+        .from('insight_snapshots')
+        .upsert(rows, { onConflict: 'campaign_id,snapshot_date' });
+      if (snapErr) throw snapErr;
+      console.log(`${rows.length} daily rows saved for: ${c.name}`);
+    } else {
+      console.log(`No insights yet for: ${c.name}`);
+    }
+  }
+}
+
+main().catch((err) => {
+  console.error('Error:', err.response?.data?.error?.message || err.message || err);
+  process.exit(1);
+});
+````
+
+## File: webapp/app/tree/page.tsx
+````typescript
+import { createClient } from '@supabase/supabase-js';
+import TreeView from './TreeView';
+import { resolveRange, sumRows, kpiFromTotals } from './dateRange';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+export default async function TreePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
+}) {
+  const params = await searchParams;
+  const range = resolveRange(params.range, params.from, params.to);
+
+  // For now: just grab the first campaign.
+  const { data: campaigns } = await supabase
+    .from('campaigns')
+    .select('id, name, kpi_metric, kpi_target')
+    .limit(1);
+
+  const campaign = campaigns?.[0];
+
+  if (!campaign) {
+    return <div style={{ padding: 20 }}>No campaigns yet — run sync-campaigns.js first.</div>;
+  }
+
+  const { data: changes } = await supabase
+    .from('changes')
+    .select('id, change_date, change_type, comment, metric_before, metric_after')
+    .eq('campaign_id', campaign.id)
+    .gte('change_date', range.from)
+    .lte('change_date', range.to)
+    .order('change_date', { ascending: true });
+
+  const { data: snaps } = await supabase
+    .from('insight_snapshots')
+    .select('spend, impressions, clicks')
+    .eq('campaign_id', campaign.id)
+    .gte('snapshot_date', range.from)
+    .lte('snapshot_date', range.to);
+
+  const totals = sumRows(snaps ?? []);
+  const liveValue = kpiFromTotals(campaign.kpi_metric, totals);
+
+  return (
+    <TreeView
+      campaignName={campaign.name}
+      campaignId={campaign.id}
+      kpiMetric={campaign.kpi_metric}
+      kpiTarget={campaign.kpi_target}
+      changes={changes ?? []}
+      liveValue={liveValue}
+      range={range}
+      totals={totals}
+    />
+  );
+}
+````
+
+## File: webapp/app/globals.css
+````css
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+.tree-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.tree-header-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-kpi-settings {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-top: 6px;
+  margin-left: auto;
+}
+
+.tree-kpi-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tree-kpi-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 7px 13px;
+  border: 1px solid rgba(217, 183, 106, 0.72);
+  border-radius: 999px;
+  background: rgba(217, 183, 106, 0.12);
+  color: #F0D9A3;
+  font-size: 13px;
+}
+
+.tree-kpi-pill-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tree-kpi-pill select,
+.tree-kpi-target-entry input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #F3EFE6;
+  font: inherit;
+}
+
+.tree-kpi-pill select {
+  min-width: 56px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.tree-kpi-pill select option {
+  color: #F3EFE6;
+  background: #122a23;
+}
+
+.tree-kpi-target-entry {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  color: #F3EFE6;
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.tree-kpi-target-entry input {
+  width: 78px;
+  padding: 0;
+  font-size: 17px;
+  font-weight: 750;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tree-kpi-target-entry input::-webkit-inner-spin-button,
+.tree-kpi-target-entry input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.tree-kpi-pill:focus-within {
+  outline: 2px solid #F0D9A3;
+  outline-offset: 3px;
+}
+
+.tree-kpi-save-status {
+  max-width: 300px;
+  min-height: 1em;
+  color: #F0D9A3;
+  font-size: 12px;
+  text-align: right;
+}
+
+.tree-kpi-save-status:empty {
+  display: none;
+}
+
+.tree-kpi-save-status[role="alert"] {
+  color: #F0A28A;
+}
+
+@media (max-width: 560px) {
+  .tree-header {
+    flex-wrap: wrap;
+  }
+
+  .tree-kpi-settings {
+    margin-top: 4px;
+  }
+}
+
+.tree-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 860px) {
+  .tree-layout {
+    grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.9fr);
+  }
+}
+````
+
 ## File: webapp/app/tree/TreeView.tsx
 ````typescript
 'use client';
 
 import { useState } from 'react';
+import DateRangePicker from './DateRangePicker';
+import KpiControls from './KpiControls';
+import type { ResolvedRange, Totals } from './dateRange';
 
 const PALETTE = {
   bg: '#0b1c17',
@@ -996,7 +1737,7 @@ const PALETTE = {
   shadow: 'rgba(6, 12, 10, 0.45)',
 };
 
-const LOWER_IS_BETTER = ['cpm', 'cpc', 'cpa'];
+const LOWER_IS_BETTER = ['cpm', 'cpc', 'cpv', 'cpa'];
 const HEALTH_Y = 260;
 const TRUNK_BASE = { x: 450, y: 540 };
 const TRUNK_WIGGLE = [
@@ -1113,10 +1854,16 @@ function clamp(value: number, min: number, max: number) {
 
 function computeLayout(changes: Change[], kpiTarget: number, kpiMetric: string, liveValue: number | null) {
   const lowerBetter = LOWER_IS_BETTER.includes(kpiMetric.toLowerCase());
-  const relativePerformance = (value: number) => lowerBetter
-    ? (kpiTarget - value) / kpiTarget
-    : (value - kpiTarget) / kpiTarget;
-  const latestChange = [...changes].reverse().find((change) => change.metric_after != null || change.metric_before != null);
+  const relativePerformance = (value: number) => {
+    if (kpiTarget === 0) return value === 0 ? 0 : lowerBetter ? -1 : 1;
+    return lowerBetter
+      ? (kpiTarget - value) / kpiTarget
+      : (value - kpiTarget) / kpiTarget;
+  };
+  const hasHistoricalKpiValues = !['cpv', 'cpa'].includes(kpiMetric.toLowerCase());
+  const latestChange = hasHistoricalKpiValues
+    ? [...changes].reverse().find((change) => change.metric_after != null || change.metric_before != null)
+    : undefined;
   const currentValue = liveValue ?? latestChange?.metric_after ?? latestChange?.metric_before ?? null;
   const latestValue = currentValue ?? kpiTarget;
   const foliageMood: FoliageMood = relativePerformance(latestValue) >= 0 ? 'sage' : 'olive';
@@ -1236,18 +1983,22 @@ function CrownShoot({ trunkTop, mood }: { trunkTop: number; mood: FoliageMood })
 
 export default function TreeView({
   campaignName,
+  campaignId,
   kpiMetric,
   kpiTarget,
   changes,
   liveValue,
-  snapshotDate,
+  range,
+  totals,
 }: {
   campaignName: string;
+  campaignId: string;
   kpiMetric: string;
   kpiTarget: number;
   changes: Change[];
   liveValue: number | null;
-  snapshotDate: string | null;
+  range: ResolvedRange;
+  totals: Totals | null;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -1267,7 +2018,7 @@ export default function TreeView({
       }}
     >
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <header className="tree-header" style={{ marginBottom: 20 }}>
+                <header className="tree-header" style={{ marginBottom: 20 }}>
           <div className="tree-header-copy">
             <div style={{ color: PALETTE.muted, fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
               Campaign overview
@@ -1277,16 +2028,35 @@ export default function TreeView({
             </h1>
             <div aria-label="Current KPI status" style={{ color: foliageMood === 'sage' ? PALETTE.sage : PALETTE.optimization, fontSize: 13, lineHeight: 1.5 }}>
               {currentValue == null
-                ? `No logged ${kpiMetric.toUpperCase()} value yet`
-                : `${kpiMetric.toUpperCase()} now ${formatMetric(currentValue)} · ${formatTargetDelta(currentValue, kpiTarget, LOWER_IS_BETTER.includes(kpiMetric.toLowerCase()))}${liveValue != null && snapshotDate ? ` · as of ${snapshotDate}` : ''}`}
+                ? `No ${kpiMetric.toUpperCase()} data in ${range.label}`
+                : `${kpiMetric.toUpperCase()} ${formatMetric(currentValue)} · ${formatTargetDelta(currentValue, kpiTarget, LOWER_IS_BETTER.includes(kpiMetric.toLowerCase()))} · ${range.label}`}
             </div>
           </div>
-          <div className="tree-kpi-target" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: 'fit-content', padding: '8px 12px', borderRadius: 999, background: 'rgba(32, 55, 47, 0.9)', border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.goldSoft, fontSize: 13 }}>
-            <span style={{ opacity: 0.85, letterSpacing: '0.04em' }}>{kpiMetric.toUpperCase()}</span>
-            <span style={{ opacity: 0.7 }}>target:</span>
-            <span style={{ fontWeight: 700, color: PALETTE.parchment }}>{kpiTarget.toLocaleString('en-US')}€</span>
+          <div className="tree-kpi-settings">
+            <DateRangePicker range={range} />
+            <KpiControls
+              campaignId={campaignId}
+              initialMetric={kpiMetric}
+              initialTarget={kpiTarget}
+            />
           </div>
         </header>
+
+        {totals && (
+          <div aria-label="Performance totals" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+            {[
+              ['Spend', `${totals.spend.toLocaleString('en-US', { maximumFractionDigits: 2 })}€`],
+              ['Impressions', totals.impressions.toLocaleString('en-US')],
+              ['Clicks', totals.clicks.toLocaleString('en-US')],
+              ['CPM', totals.cpm == null ? '—' : `${totals.cpm.toFixed(2)}€`],
+            ].map(([name, value]) => (
+              <div key={name} style={{ minWidth: 120, padding: '10px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: `1px solid ${PALETTE.panelBorder}` }}>
+                <div style={{ color: PALETTE.muted, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase' }}>{name}</div>
+                <div style={{ marginTop: 4, fontSize: 18, fontWeight: 700 }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="tree-layout" style={{ display: 'grid', gap: 20, alignItems: 'stretch' }}>
           <section
@@ -1538,74 +2308,5 @@ export default function TreeView({
       </div>
     </div>
   );
-}
-````
-
-## File: webapp/app/globals.css
-````css
-@import "tailwindcss";
-
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-.tree-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 24px;
-}
-
-.tree-header-copy {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.tree-kpi-target {
-  flex-shrink: 0;
-  margin-top: 6px;
-  margin-left: auto;
-}
-
-@media (max-width: 560px) {
-  .tree-header {
-    flex-wrap: wrap;
-  }
-
-  .tree-kpi-target {
-    margin-top: 4px;
-  }
-}
-
-.tree-layout {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-@media (min-width: 860px) {
-  .tree-layout {
-    grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.9fr);
-  }
 }
 ````

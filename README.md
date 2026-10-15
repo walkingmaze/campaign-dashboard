@@ -1,6 +1,8 @@
 # Meta-Plant
 
-A campaign changelog that grows. Meta-Plant shows the optimization history of a Meta Ads campaign as a jade plant: every logged optimization is a branch, and its color shows whether the KPI got better or worse.
+A growing campaign changelog. Meta-Plant visualizes the optimization history of a Meta Ads campaign as a plant: each logged optimization forms a branch, and the branch color indicates its health based on the campaign’s performance as a result of the optimization. 
+
+ ![Meta-Plant screenshot](docs/plant.png)
 
 
 ## Why
