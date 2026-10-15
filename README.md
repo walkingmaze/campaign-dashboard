@@ -13,11 +13,12 @@ In paid social, optimizations are often tracked in a spreadsheet, and people ope
 
 - Daily automatic sync of campaign performance from the Meta Marketing API
 - Form to log an optimization (type, date, comment, KPI before and after)
+- Date range picker (Today, Yesterday, Last 7 days, Last 30 days, This month, Last month, custom): the totals, KPI status, plant, and changes follow the chosen period
 - Plant view: each branch is one optimization. Sage = better than target, orange = worse, dashed gold line = KPI target
 - Live KPI status with the distance to target, taken from the latest sync
 - Editable campaign KPI settings on the plant page: choose CPC, CPM, CPV, or CPA and save a euro target
 - CPV and CPA selections show no live value until video-view or conversion data is available
-- Email alert when a campaign drops below its KPI target (sent once, until it recovers)
+- Email alert when the last 3 days are worse than the KPI target (sent once, until it recovers)
 - Playwright smoke tests
 
 ## How it works
@@ -49,7 +50,7 @@ webapp/tests/                          Playwright tests
 
 ## Data model
 
-Three tables: `campaigns` (KPI metric and target), `insight_snapshots` (one row per sync), `changes` (logged optimizations). Row Level Security is enabled; the app reads and writes on the server only.
+Three tables: `campaigns` (KPI metric and target), `insight_snapshots` (one row per campaign and day), `changes` (logged optimizations). Row Level Security is enabled; the app reads and writes on the server only.
 
 ## Run locally
 
@@ -81,7 +82,7 @@ npx playwright install chromium
 npm test
 ```
 
-The four smoke tests only read data: page navigation, campaign list, plant page with live KPI status, and form validation.
+The six smoke tests cover page navigation, the campaign list, the plant page with its KPI settings, KPI target validation, form validation, and the date range picker. None of them writes data.
 
 ## Notes
 
