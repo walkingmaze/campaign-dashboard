@@ -4,4 +4,5 @@ node_modules/
 .github/hooks/
 .github/skills/
 test-results/
-playwright-report/
+playwright-report/repomix-output.md
+.impeccable/
