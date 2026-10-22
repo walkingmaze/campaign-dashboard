@@ -56,16 +56,22 @@ Three tables: `campaigns` (KPI metric and target), `insight_snapshots` (one row 
 
 Needs Node 22+, a Supabase project, and a Meta system user token with `ads_read`.
 
-Environment variables:
+**1. Create the tables.** Run `schema.sql` in the Supabase SQL Editor.
+
+**2. Set the environment variables.** Set these in your terminal (or as Codespaces secrets):
 
 ```
 META_ACCESS_TOKEN
 SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY   (the Supabase secret key)
-RESEND_API_KEY
-ALERT_EMAIL_TO
+RESEND_API_KEY              (only needed for the alert email)
+ALERT_EMAIL_TO              (only needed for the alert email)
 ```
-Create the tables first: run schema.sql in the Supabase SQL Editor.
+
+For the web app, put `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in a file `webapp/.env.local`.
+
+**3. Sync and start.**
+
 ```
 npm install
 node sync-campaigns.js
@@ -73,6 +79,8 @@ cd webapp
 npm install
 npm run dev
 ```
+
+**4. Daily sync on GitHub (optional).** Add the same five values as repository secrets under Settings → Secrets and variables → Actions. The workflow in `.github/workflows` then runs every morning.
 
 ## Tests
 
