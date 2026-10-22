@@ -37,16 +37,16 @@ async function main() {
       campaignRowId = existing.id;
       await supabase.from('campaigns').update({ name: c.name }).eq('id', existing.id);
       console.log(`Campaign already exists: ${c.name}`);
-    } else {
-      // Insert new campaign with placeholder KPI values —
-      // update kpi_metric/kpi_target manually in Supabase's Table Editor afterward
+       } else {
+      // Insert new campaign with default KPI values —
+      // change kpi_metric/kpi_target afterward on the plant page
       const { data: inserted, error } = await supabase
         .from('campaigns')
         .insert({
           meta_campaign_id: c.id,
           name: c.name,
-          kpi_metric: 'ctr',
-          kpi_target: 1.8,
+          kpi_metric: 'cpm',
+          kpi_target: 1,
         })
         .select('id')
         .single();
