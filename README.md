@@ -65,7 +65,7 @@ SUPABASE_SERVICE_ROLE_KEY   (the Supabase secret key)
 RESEND_API_KEY
 ALERT_EMAIL_TO
 ```
-
+Create the tables first: run schema.sql in the Supabase SQL Editor.
 ```
 npm install
 node sync-campaigns.js
